@@ -1,6 +1,7 @@
 import numpy as np
 import random
 
+from collections import defaultdict
 from baselines.common.segment_tree import SumSegmentTree, MinSegmentTree
 
 
@@ -16,6 +17,10 @@ class ReplayBuffer(object):
         """
         self._storage = []
         self._maxsize = size
+        self._next_idx = 0
+        
+    def reset(self):
+        self._storage = []
         self._next_idx = 0
 
     def __len__(self):
@@ -67,6 +72,38 @@ class ReplayBuffer(object):
         idxes = [random.randint(0, len(self._storage) - 1) for _ in range(batch_size)]
         return self._encode_sample(idxes)
 
+class CountingReplayBuffer(ReplayBuffer):
+    """Create a replay buffer that is also counting 
+    the states as it goes.
+    """
+    def __init__(self, size, env_dim):
+        super(CountingReplayBuffer, self).__init__(size)
+        self._state_counts = np.zeros((env_dim,), dtype='float32')
+
+    def reset(self):
+        self._storage = []
+        self._next_idx = 0
+        self._state_counts = np.zeros_like(self._state_counts)
+
+    def add(self, obs_t, action, reward, obs_tp1, done):
+        data = (obs_t, action, reward, obs_tp1, done)
+
+        if self._next_idx >= len(self._storage):
+            self._storage.append(data)
+        else:
+            self._storage[self._next_idx] = data
+        self._next_idx = (self._next_idx + 1) % self._maxsize
+        # TODO this should probably have a maximum size
+        # count the states we have visited
+        self._state_counts[np.where(obs_t == 1)] += 1
+        # count the final state if we walk there
+        if done:
+            self._state_counts[np.where(obs_tp1 == 1)] += 1
+
+    @property
+    def state_counts(self):
+        return self._state_counts / self._state_counts.max()
+ 
 
 class PrioritizedReplayBuffer(ReplayBuffer):
     def __init__(self, size, alpha):
